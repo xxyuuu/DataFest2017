@@ -4,6 +4,49 @@ output: html_notebook
 ---
 
 ```{r}
+library(dplyr)
+library(lubridate)
+library(readr)
+```
 
+```{r}
+setwd("~/Google 云端硬盘/2017 SPRING/datafest/data/DataFest 2017 DataASADataFest2017 Data")
+
+dat = read_tsv("data.txt")
+dest = read_tsv("dest.txt")
+
+uni_user_id = unique(dat$user_id)
+
+set.seed(1001)
+sam_users = uni_user_id[sample(1:length(uni_user_id), length(uni_user_id)/100)] 
+
+sam_dat = dat %>%
+  filter(user_id %in%  sam_users)
+
+saveRDS(sam_dat, "3.31_11.50_sam_data.rds")
+
+
+```
+
+```{r}
+click_qual = sam_dat %>%
+  select(user_id, date_time, is_booking,hist_price_band,srch_destination_id) %>%
+  na.omit() %>%
+  mutate(price = dplyr::recode(hist_price_band, 
+                               'VH' = 5, 
+                               'H' = 4,
+                               'M' = 3,
+                               'L' = 2,
+                               'VL' = 1)) %>%
+  mutate(day = as_date(date_time))%>%
+ group_by(user_id, srch_destination_id) %>%
+  summarise(start_click = min(date_time),
+            end_click = max(date_time),
+            book_count = sum(is_booking),
+            click_count = n(),
+            max_click_price = max(price[is_booking == 0]),
+            min_click_price = min(price[is_booking == 0]),
+            max_book_price = max(price[is_booking ==1]),
+            min_book_price = min(price[is_booking ==1]))
 ```
 
