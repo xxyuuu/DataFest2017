@@ -39,8 +39,10 @@ click_qual = sam_dat %>%
                                'L' = 2,
                                'VL' = 1)) %>%
   mutate(day = as_date(date_time))%>%
- group_by(user_id, srch_destination_id) %>%
+ group_by(user_id, srch_destination_id) 
+#%>%
   summarise(start_click = min(date_time),
+            hist_price_band = hist_price_band,
             end_click = max(date_time),
             book_count = sum(is_booking),
             click_count = n(),
@@ -48,5 +50,161 @@ click_qual = sam_dat %>%
             min_click_price = min(price[is_booking == 0]),
             max_book_price = max(price[is_booking ==1]),
             min_book_price = min(price[is_booking ==1]))
+```
+```{r}
+dest_pattern <- dest %>%
+  select(srch_destination_name,srch_destination_type_id, srch_destination_latitude,srch_destination_longitude)%>%
+  na.omit() %>%
+  group_by(srch_destination_type_id)
+  #summarise(
+    max_lat = max(srch_destination_latitude),
+    min_lat = min(srch_destination_latitude),
+    max_long = max(srch_destination_longitude),
+    min_long = min(srch_destination_longitude)
+  )
+
+dest_pattern
+
+ggplot(click_qual,)
+```
+
+```{r}
+withdest <- full_join(click_qual,dest, by = "srch_destination_id")
+withdest<- withdest%>%
+  select(user_id, date_time, is_booking,hist_price_band,srch_destination_id,srch_destination_name,srch_destination_type_id)
+```
+
+***Classification***
+```{r}
+pca <- princomp(dest[,-(1:5)], cor=T)
+pca$scores
+
+destC = dest[,-(1:5)]
+desCluster <- kmeans(dest[,-(1:5)], 7)
+desCluster$cluster
+desCluster$centers
+```
+
+```{r}
+click_qual = sam_dat %>%
+  select(user_id, date_time, is_booking, hist_price_band, srch_destination_id) %>%
+  na.omit() %>%
+  mutate(price = dplyr::recode(hist_price_band, 
+                               'VH' = 5, 
+                               'H' = 4,
+                               'M' = 3,
+                               'L' = 2,
+                               'VL' = 1)) %>%
+  mutate(day = as_date(date_time)) %>%
+  arrange(user_id, day) %>%
+  group_by(user_id) %>%
+  mutate(diff_days = c(0, diff(day)))
+
+check_attempt = function(user){
+  user_dat = click_qual[click_qual$user_id == user,] %>%
+    arrange(user_id, date_time)
+  
+  attemp = rep(NA, nrow(user_dat))
+  
+  for(i in 1:nrow(user_dat)){
+    if(i == 1){
+     # print("a")
+      attemp[1] = 1
+      next
+    }
+    #if(user_dat$is_booking[i-1] == 1){
+    # # print("b")
+    #  attemp[i] = attemp[i-1] +1
+    #  next
+    #}
+    if(user_dat$diff_days[i] > 2){
+      attemp[i] = attemp[i-1] + 1
+     # print("c")
+      next
+    }
+    
+   # print('d')
+    attemp[i] = attemp[i-1]
+  }
+  return(attemp)
+}
+
+attemp = unlist(sapply(sort(unique(click_qual$user_id)), check_attempt))
+click_qual$attempt = attemp
+
+attempt_dat = click_qual %>%
+  group_by(user_id, attempt) %>%
+  summarise(start_click = min(date_time),
+            end_click = max(date_time),
+            inter_count = n(),
+            click_count = n() - sum(is_booking),
+            book_count = sum(is_booking))
+```
+
+```{r}
+click_qual = sam_dat %>%
+  select(user_id, date_time, is_booking, hist_price_band, srch_destination_id) %>%
+  na.omit() %>%
+  mutate(price = dplyr::recode(hist_price_band, 
+                               'VH' = 5, 
+                               'H' = 4,
+                               'M' = 3,
+                               'L' = 2,
+                               'VL' = 1)) %>%
+  mutate(pay = price * is_booking)%>%
+  mutate(day = as_date(date_time)) %>%
+  arrange(user_id, date_time) %>%
+  group_by(user_id) %>%
+  mutate(diff_days = c(0,diff(day))) %>%
+  mutate(new_attempt = diff_days >= 2) %>%
+  group_by(user_id) %>%
+  mutate(attempt = cumsum(new_attempt))
+
+
+attempt_dat = click_qual %>%
+  group_by(user_id, attempt) %>%
+  summarise(start_click = min(date_time),
+            end_click = max(date_time),
+            inter_count = n(),
+            click_count = n() - sum(is_booking),
+            book_count = sum(is_booking),
+            dest_count = n_distinct(srch_destination_id),
+            sum_pay = sum(pay)
+            )
+
+          
+```
+```{r}
+table(attempt_dat$dest_count)
+```
+
+```{r}
+user_dat = attempt_dat %>%
+  group_by(user_id) %>%
+  summarise(attempt_count = n(),
+            total_book = sum(book_count),
+            user_pay = sum(sum_pay)
+            )
+
+summary(user_dat)
+```
+```{r}
+table(user_dat$user_pay)
+```
+
+
+
+```{r}
+user_highpay = user_dat%>%
+  filter(user_pay>=4 & attempt_count<=3)
+```
+
+```{r}
+new_sam_dat = sam_dat %>%
+  mutate(if_highpay = ifelse(sam_dat$user_id%in%user_highpay$user_id,1,0))
+```
+
+```{r}
+glm = glm(if_highpay ~ .-(1:7), data = new_sam_dat )
 ```
 
